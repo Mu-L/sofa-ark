@@ -127,6 +127,11 @@ public class ArkConfigs {
         return val == null ? defaultValue : Integer.valueOf(val);
     }
 
+    public static boolean getBooleanValue(String primaryKey, boolean defaultValue) {
+        String val = getStringValue(primaryKey);
+        return val == null ? defaultValue : Boolean.valueOf(val);
+    }
+
     /**
      * Get ArkConfigs key set
      *
@@ -161,5 +166,9 @@ public class ArkConfigs {
 
     public static void setEmbedStaticBizEnable(boolean enable) {
         System.setProperty(Constants.EMBED_STATIC_BIZ_ENABLE, enable ? "true" : "false");
+    }
+
+    public static boolean isBizSpecifyDependentPluginsEnable() {
+        return Boolean.getBoolean(Constants.BIZ_SPECIFY_DEPENDENT_PLUGINS_ENABLE);
     }
 }

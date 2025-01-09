@@ -16,23 +16,24 @@
  */
 package com.alipay.sofa.ark.common.util;
 
+import com.alipay.sofa.ark.exception.ArkRuntimeException;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
-import sun.misc.Unsafe;
 
-import java.io.File;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
-import java.lang.reflect.Field;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static com.alipay.sofa.ark.common.util.EnvironmentUtils.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.mockito.Mockito.when;
 
 /**
@@ -83,7 +84,7 @@ public class ClassLoaderUtilTest {
 
     @Test
     @SuppressWarnings({ "restriction", "unchecked" })
-    public void testGetURLs() throws NoSuchFieldException, IllegalAccessException {
+    public void testGetURLs() {
         ClassLoader urlClassLoader = new URLClassLoader(new URL[] {});
         Assert.assertArrayEquals(((URLClassLoader) urlClassLoader).getURLs(),
             ClassLoaderUtils.getURLs(urlClassLoader));
@@ -92,31 +93,27 @@ public class ClassLoaderUtilTest {
         URL[] urls = null;
         if (appClassLoader instanceof URLClassLoader) {
             urls = ((URLClassLoader) appClassLoader).getURLs();
+            Assert.assertArrayEquals(urls, ClassLoaderUtils.getURLs(appClassLoader));
         } else {
-
-            Field field = Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            Unsafe unsafe = (Unsafe) field.get(null);
-
-            // jdk.internal.loader.ClassLoaders.AppClassLoader.ucp
-            Field ucpField = appClassLoader.getClass().getDeclaredField("ucp");
-            long ucpFieldOffset = unsafe.objectFieldOffset(ucpField);
-            Object ucpObject = unsafe.getObject(appClassLoader, ucpFieldOffset);
-
-            // jdk.internal.loader.URLClassPath.path
-            Field pathField = ucpField.getType().getDeclaredField("path");
-            long pathFieldOffset = unsafe.objectFieldOffset(pathField);
-            ArrayList<URL> path = (ArrayList<URL>) unsafe.getObject(ucpObject, pathFieldOffset);
-
-            urls = path.toArray(new URL[path.size()]);
+            String classpath = System.getProperty("java.class.path");
+            String[] classpathEntries = classpath.split(System.getProperty("path.separator"));
+            List<URL> classpathURLs = new ArrayList<>();
+            for (String classpathEntry : classpathEntries) {
+                URL url = null;
+                try {
+                    url = FileUtils.file(classpathEntry).toURI().toURL();
+                } catch (MalformedURLException e) {
+                    e.printStackTrace();
+                    throw new ArkRuntimeException("Failed to get urls from " + appClassLoader, e);
+                }
+                classpathURLs.add(url);
+            }
+            urls = classpathURLs.toArray(new URL[0]);
         }
         Assert.assertArrayEquals(urls, ClassLoaderUtils.getURLs(appClassLoader));
 
-        URL url1 = this.getClass().getResource("");
-        URL[] mockURLs = new URL[] { url1 };
-        MockClassLoader mockClassLoader = new MockClassLoader(mockURLs);
-        Assert.assertArrayEquals(mockClassLoader.getURLs(),
-            ClassLoaderUtils.getURLs(mockClassLoader));
+        URL[] urLs = ClassLoaderUtils.getURLs(null);
+        Assert.assertNotNull(urLs);
 
     }
 
@@ -137,5 +134,32 @@ public class ClassLoaderUtilTest {
         Assert.assertEquals(1, agentUrl.length);
 
         managementFactoryMockedStatic.close();
+    }
+
+    @Test
+    public void testParseSkyWalkingAgentPath() {
+        List<String> mockArguments = new ArrayList<>();
+        String workingPath = this.getClass().getClassLoader()
+                .getResource("sample-skywalking-agent.jar").getPath();
+        mockArguments.add(String.format("-javaagent:%s", workingPath));
+        RuntimeMXBean runtimeMXBean = Mockito.mock(RuntimeMXBean.class);
+        when(runtimeMXBean.getInputArguments()).thenReturn(mockArguments);
+
+        MockedStatic<ManagementFactory> managementFactoryMockedStatic = Mockito.mockStatic(ManagementFactory.class);
+        managementFactoryMockedStatic.when(ManagementFactory::getRuntimeMXBean).thenReturn(runtimeMXBean);
+
+        URL[] agentUrl = ClassLoaderUtils.getAgentClassPath();
+        Assert.assertEquals(2, agentUrl.length);
+
+        managementFactoryMockedStatic.close();
+    }
+
+    @Test
+    public void testEnvironmentUtils() {
+        assertNull(getProperty("not_exists_prop"));
+        setSystemProperty("not_exists_prop", "aaa");
+        assertEquals("aaa", getProperty("not_exists_prop"));
+        clearSystemProperty("not_exists_prop");
+        assertNull(getProperty("not_exists_prop"));
     }
 }

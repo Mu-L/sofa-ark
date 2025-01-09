@@ -23,6 +23,7 @@ import com.alipay.sofa.ark.common.util.StringUtils;
 import com.alipay.sofa.ark.container.model.BizModel;
 import com.alipay.sofa.ark.spi.constant.Constants;
 import com.alipay.sofa.ark.spi.model.Biz;
+import com.alipay.sofa.ark.spi.model.BizInfo.StateChangeReason;
 import com.alipay.sofa.ark.spi.model.BizState;
 import com.alipay.sofa.ark.spi.service.biz.BizManagerService;
 import com.google.inject.Singleton;
@@ -45,6 +46,8 @@ public class BizManagerServiceImpl implements BizManagerService {
     public boolean registerBiz(Biz biz) {
         AssertUtils.assertNotNull(biz, "Biz must not be null.");
         AssertUtils.isTrue(biz.getBizState() == BizState.RESOLVED, "BizState must be RESOLVED.");
+        // Two level cache here. First level cache key is biz name, and value is versions cache.
+        // Second level cache key is version, value is biz model.
         bizRegistration.putIfAbsent(biz.getBizName(), new ConcurrentHashMap<>(16));
         ConcurrentHashMap<String, Biz> bizCache = bizRegistration.get(biz.getBizName());
         return bizCache.put(biz.getBizVersion(), biz) == null;
@@ -170,9 +173,13 @@ public class BizManagerServiceImpl implements BizManagerService {
         Biz activeBiz = getActiveBiz(bizName);
         if (biz != null && biz.getBizState() == BizState.DEACTIVATED) {
             if (activeBiz != null) {
-                ((BizModel) activeBiz).setBizState(BizState.DEACTIVATED);
+                ((BizModel) activeBiz).setBizState(BizState.DEACTIVATED,
+                    StateChangeReason.SWITCHED,
+                    String.format("switch to new version %s", biz.getIdentity()));
             }
-            ((BizModel) biz).setBizState(BizState.ACTIVATED);
+            String message = activeBiz == null ? "" : String.format("switch from old version: %s",
+                activeBiz.getIdentity());
+            ((BizModel) biz).setBizState(BizState.ACTIVATED, StateChangeReason.SWITCHED, message);
         }
     }
 

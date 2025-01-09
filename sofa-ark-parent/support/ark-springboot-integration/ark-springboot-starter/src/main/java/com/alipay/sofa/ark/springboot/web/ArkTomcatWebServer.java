@@ -42,6 +42,8 @@ import org.springframework.boot.web.server.WebServerException;
 import org.springframework.util.Assert;
 
 /**
+ * NOTE: Tomcat instance will start immediately when create ArkTomcatWebServer object.
+ *
  * @author Brian Clozel
  * @author Kristine Jetzke
  * @author 0.6.0
@@ -148,7 +150,7 @@ public class ArkTomcatWebServer implements WebServer {
 
     private void addInstanceIdToEngineName() {
         int instanceId = containerCounter.incrementAndGet();
-        if (instanceId > 0) {
+        if (instanceId > 0) { // We already have a tomcat container, so just return the existing tomcat.
             Engine engine = this.tomcat.getEngine();
             engine.setName(engine.getName() + "-" + instanceId);
         }
@@ -196,6 +198,8 @@ public class ArkTomcatWebServer implements WebServer {
             if (this.started) {
                 return;
             }
+
+            Context context = findContext();
             try {
                 addPreviouslyRemovedConnectors();
                 this.tomcat.getConnector();
@@ -209,14 +213,13 @@ public class ArkTomcatWebServer implements WebServer {
             } catch (Exception ex) {
                 throw new WebServerException("Unable to start embedded Tomcat server", ex);
             } finally {
-                Context context = findContext();
                 ContextBindings.unbindClassLoader(context, context.getNamingToken(), getClass()
                     .getClassLoader());
             }
         }
     }
 
-    private void checkThatConnectorsHaveStarted() {
+    void checkThatConnectorsHaveStarted() {
         checkConnectorHasStarted(this.tomcat.getConnector());
         for (Connector connector : this.tomcat.getService().findConnectors()) {
             checkConnectorHasStarted(connector);
@@ -250,7 +253,7 @@ public class ArkTomcatWebServer implements WebServer {
         awaitThread.stop();
     }
 
-    private void addPreviouslyRemovedConnectors() {
+    void addPreviouslyRemovedConnectors() {
         Service[] services = this.tomcat.getServer().findServices();
         for (Service service : services) {
             Connector[] connectors = this.serviceConnectors.get(service);

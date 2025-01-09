@@ -16,8 +16,7 @@
  */
 package com.alipay.sofa.ark.boot.mojo;
 
-import com.alipay.sofa.ark.common.util.ParseUtils;
-import com.alipay.sofa.ark.spi.constant.Constants;
+import com.alipay.sofa.ark.boot.mojo.model.ArkConfigHolder;
 import com.alipay.sofa.ark.tools.ArtifactItem;
 import com.alipay.sofa.ark.tools.Libraries;
 import com.alipay.sofa.ark.tools.Repackager;
@@ -50,25 +49,23 @@ import org.apache.maven.shared.invoker.InvocationResult;
 import org.apache.maven.shared.invoker.Invoker;
 import org.apache.maven.shared.invoker.MavenInvocationException;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.alipay.sofa.ark.spi.constant.Constants.ARK_CONF_BASE_DIR;
-import static com.alipay.sofa.ark.spi.constant.Constants.EXTENSION_EXCLUDES;
-import static com.alipay.sofa.ark.spi.constant.Constants.EXTENSION_EXCLUDES_ARTIFACTIDS;
-import static com.alipay.sofa.ark.spi.constant.Constants.EXTENSION_EXCLUDES_GROUPIDS;
+import static com.alipay.sofa.ark.boot.mojo.utils.ParseUtils.getStringSet;
+import static com.alipay.sofa.ark.spi.constant.Constants.DECLARED_LIBRARIES_WHITELIST;
+import static com.alipay.sofa.ark.tools.ArtifactItem.parseArtifactItem;
 
 /**
  * Repackages existing JAR archives so that they can be executed from the command
@@ -81,6 +78,8 @@ import static com.alipay.sofa.ark.spi.constant.Constants.EXTENSION_EXCLUDES_GROU
 public class RepackageMojo extends TreeMojo {
 
     private static final String    BIZ_NAME                   = "com.alipay.sofa.ark.bizName";
+
+    private static final String    DEFAULT_EXCLUDE_RULES      = "rules.txt";
 
     @Parameter(defaultValue = "${project}", readonly = true, required = true)
     private MavenProject           mavenProject;
@@ -107,8 +106,15 @@ public class RepackageMojo extends TreeMojo {
     @Parameter(defaultValue = "${project.basedir}", required = true)
     private File                   baseDir;
 
+    /**
+     * Deprecated by the default conf/ark/bootstrap.properties or conf/ark/bootstrap.yml
+     */
+    @Deprecated
     @Parameter(defaultValue = "", required = false)
     private String                 packExcludesConfig;
+
+    @Parameter(defaultValue = "", required = false)
+    private String                 packExcludesUrl;
 
     /**
      * Name of the generated archive
@@ -200,7 +206,9 @@ public class RepackageMojo extends TreeMojo {
     private ProjectBuildingRequest projectBuildingRequest;
 
     /**
-     * Colon separated groupId, artifactId [and classifier] to exclude (exact match)
+     * Colon separated groupId, artifactId [and classifier] to exclude (exact match). e.g:
+     * group-a:tracer-core:3.0.10
+     * group-b:tracer-core:3.0.10:jdk17
      */
     @Parameter(defaultValue = "")
     private LinkedHashSet<String>  excludes                   = new LinkedHashSet<>();
@@ -216,6 +224,26 @@ public class RepackageMojo extends TreeMojo {
      */
     @Parameter(defaultValue = "")
     private LinkedHashSet<String>  excludeArtifactIds         = new LinkedHashSet<>();
+
+    /**
+     * Colon separated groupId, artifactId [and classifier] to include (exact match). e.g:
+     * group-a:tracer-core:3.0.10
+     * group-b:tracer-core:3.0.10:jdk17
+     */
+    @Parameter(defaultValue = "")
+    private LinkedHashSet<String>  includes                   = new LinkedHashSet<>();
+
+    /**
+     * list of groupId names to include (exact match).
+     */
+    @Parameter(defaultValue = "")
+    private LinkedHashSet<String>  includeGroupIds            = new LinkedHashSet<>();
+
+    /**
+     * list of artifact names to include (exact match).
+     */
+    @Parameter(defaultValue = "")
+    private LinkedHashSet<String>  includeArtifactIds         = new LinkedHashSet<>();
 
     /**
      * list of packages denied to be imported
@@ -278,12 +306,21 @@ public class RepackageMojo extends TreeMojo {
     @Parameter(defaultValue = "false")
     private boolean                declaredMode;
 
+    @Parameter(defaultValue = "false")
+    private boolean                disableGitInfo;
+
     /*----------------Git 相关参数---------------------*/
     /**
      * The root directory of the repository we want to check.
      */
     @Parameter(defaultValue = "")
     private File                   gitDirectory;
+
+    /**
+     * 基座依赖标识，以 ${groupId}:${artifactId}:${version} 标识
+     */
+    @Parameter(defaultValue = "")
+    private String                 baseDependencyParentIdentity;
 
     @Override
     public void execute() throws MojoExecutionException, MojoFailureException {
@@ -314,6 +351,12 @@ public class RepackageMojo extends TreeMojo {
         repackage();
     }
 
+    /**
+     *
+     *
+     * @throws MojoExecutionException
+     * @throws MojoFailureException
+     */
     private void repackage() throws MojoExecutionException, MojoFailureException {
         File source = this.mavenProject.getArtifact().getFile();
         File appTarget = getAppTargetFile();
@@ -330,6 +373,7 @@ public class RepackageMojo extends TreeMojo {
                 } else {
                     artifactItems = getAllArtifactByMavenTree();
                 }
+                artifactItems.addAll(getDeclaredLibrariesWhitelist());
                 repackager.prepareDeclaredLibraries(artifactItems);
             }
             MavenProject rootProject = MavenUtils.getRootProject(this.mavenProject);
@@ -341,17 +385,36 @@ public class RepackageMojo extends TreeMojo {
         updateArtifact(appTarget, repackager.getModuleTargetFile());
     }
 
+    protected Set<ArtifactItem> getDeclaredLibrariesWhitelist() throws IOException {
+        Set<ArtifactItem> res = new HashSet<>();
+        Properties prop = ArkConfigHolder.getArkProperties(baseDir.getAbsolutePath());
+        Map<String, Object> arkYaml = ArkConfigHolder.getArkYaml(baseDir.getAbsolutePath());
+
+        Set<String> declaredLibrariesWhitelist = new HashSet<>();
+        declaredLibrariesWhitelist.addAll(getStringSet(prop, DECLARED_LIBRARIES_WHITELIST));
+        declaredLibrariesWhitelist.addAll(getStringSet(arkYaml, DECLARED_LIBRARIES_WHITELIST));
+
+        for (String declaredLibrary : declaredLibrariesWhitelist) {
+            res.add(parseArtifactItem(declaredLibrary));
+        }
+        return res;
+    }
+
     private File getGitDirectory(MavenProject rootProject) {
+        if (disableGitInfo) {
+            return null;
+        }
         if (gitDirectory != null && gitDirectory.exists()) {
             return gitDirectory;
         }
-        return new File(rootProject.getBasedir().getAbsolutePath() + "/.git");
+        return com.alipay.sofa.ark.common.util.FileUtils.file(rootProject.getBasedir()
+            .getAbsolutePath() + "/.git");
     }
 
     private void parseArtifactItems(DependencyNode rootNode, Set<ArtifactItem> result) {
         if (rootNode != null) {
             if (!StringUtils.equalsIgnoreCase(rootNode.getArtifact().getScope(), "test")) {
-                result.add(ArtifactItem.parseArtifactItem(rootNode.getArtifact()));
+                result.add(parseArtifactItem(rootNode.getArtifact()));
             }
 
             if (CollectionUtils.isNotEmpty(rootNode.getChildren())) {
@@ -362,33 +425,61 @@ public class RepackageMojo extends TreeMojo {
         }
     }
 
+    private DependencyNode parseDependencyGraph() throws MojoExecutionException,
+                                                 MojoFailureException {
+        if (null == super.getDependencyGraph()) {
+            super.execute();
+        }
+        return super.getDependencyGraph();
+    }
+
     private Set<ArtifactItem> getAllArtifact() throws MojoExecutionException, MojoFailureException {
-        super.execute();
-        DependencyNode dependencyNode = super.getDependencyGraph();
+        DependencyNode dependencyNode = parseDependencyGraph();
         Set<ArtifactItem> results = new HashSet<>();
         parseArtifactItems(dependencyNode, results);
         return results;
     }
 
-    private Set<ArtifactItem> getAllArtifactByMavenTree() throws MojoExecutionException {
-        File baseDir = MavenUtils.getRootProject(this.mavenProject).getBasedir();
-        getLog().info("root project path: " + baseDir.getAbsolutePath());
+    private Set<ArtifactItem> getAllArtifactByMavenTree() throws MojoExecutionException,
+                                                         MojoFailureException {
+        MavenProject rootProject = MavenUtils.getRootProject(this.mavenProject);
+        getLog().info("root project path: " + rootProject.getBasedir().getAbsolutePath());
+
+        //  run  maven dependency:tree
+        try {
+            if (this.mavenProject.getBasedir() != null) {
+                doGetAllArtifactByMavenTree(this.mavenProject);
+                return getAllArtifact();
+            }
+        } catch (MojoExecutionException e) {
+            getLog().warn(
+                "execute dependency:tree failed, try to execute dependency:tree in root project");
+        }
+        return doGetAllArtifactByMavenTree(MavenUtils.getRootProject(this.mavenProject));
+    }
+
+    private Set<ArtifactItem> doGetAllArtifactByMavenTree(MavenProject project) throws MojoExecutionException {
+        File baseDir = project.getBasedir();
+        getLog().info("project path: " + baseDir.getAbsolutePath());
 
         // dependency:tree
-        String outputPath = baseDir.getAbsolutePath() + "/deps.log." + System.currentTimeMillis();
         InvocationRequest request = new DefaultInvocationRequest();
-        request.setPomFile(new File(baseDir.getAbsolutePath() + "/pom.xml"));
-
-        List<String> goals = Stream.of("dependency:tree", "-DappendOutput=true",
-            "-DoutputFile=" + outputPath).collect(Collectors.toList());
+        request.setPomFile(com.alipay.sofa.ark.common.util.FileUtils.file(baseDir.getAbsolutePath() + "/pom.xml"));
 
         Properties userProperties = projectBuildingRequest.getUserProperties();
+        String outputPath = baseDir.getAbsolutePath() + "/deps.log." + System.currentTimeMillis();
+        List<String> goals = Stream.of("dependency:tree", "-DappendOutput=true", "-DoutputFile=\"" + outputPath + "\"").collect(Collectors.toList());
         if (userProperties != null) {
-            userProperties.forEach((key, value) -> goals.add(String.format("-D%s=%s", key, value)));
+            userProperties.forEach((key, value) -> {
+                if (key instanceof String && StringUtils.equals("outputFile", (String) key)) {
+                    return;
+                }
+                goals.add(String.format("-D%s=%s", key, value));
+            });
         }
 
         getLog().info(
-            "execute 'mvn dependency:tree' with command 'mvn " + String.join(" ", goals) + "'");
+                "execute 'mvn dependency:tree' with command 'mvn " + String.join(" ", goals) + "'");
         request.setGoals(goals);
         request.setBatchMode(mavenSession.getSettings().getInteractiveMode());
         request.setProfiles(mavenSession.getSettings().getActiveProfiles());
@@ -398,16 +489,16 @@ public class RepackageMojo extends TreeMojo {
             InvocationResult result = invoker.execute(request);
             if (result.getExitCode() != 0) {
                 throw new MojoExecutionException("execute dependency:tree failed",
-                    result.getExecutionException());
+                        result.getExecutionException());
             }
 
             String depTreeStr = FileUtils.readFileToString(FileUtils.getFile(outputPath),
-                Charset.defaultCharset());
+                    Charset.defaultCharset());
             return MavenUtils.convert(depTreeStr);
         } catch (MavenInvocationException | IOException e) {
             throw new MojoExecutionException("execute dependency:tree failed", e);
         } finally {
-            File outputFile = new File(outputPath);
+            File outputFile = com.alipay.sofa.ark.common.util.FileUtils.file(outputPath);
             if (outputFile.exists()) {
                 outputFile.delete();
             }
@@ -425,6 +516,10 @@ public class RepackageMojo extends TreeMojo {
         }
     }
 
+    /**
+     * @return sofa-ark-all and all maven project's non-excluded artifacts
+     * @throws MojoExecutionException
+     */
     @SuppressWarnings("unchecked")
     private Set<Artifact> getAdditionalArtifact() throws MojoExecutionException {
         Artifact arkArtifact = repositorySystem.createArtifact(ArkConstants.getGroupId(),
@@ -440,11 +535,29 @@ public class RepackageMojo extends TreeMojo {
                 .getRemoteArtifactRepositories());
             repositorySystem.resolve(artifactResolutionRequest);
             Set<Artifact> artifacts = new HashSet<>(Collections.singleton(arkArtifact));
-            artifacts.addAll(filterExcludeArtifacts(this.mavenProject.getArtifacts()));
+
+            // 读取需要打包的依赖
+            artifacts.addAll(getSlimmedArtifacts());
             return artifacts;
         } catch (Exception ex) {
             throw new MojoExecutionException(ex.getMessage(), ex);
         }
+    }
+
+    private Set<Artifact> getSlimmedArtifacts() throws MojoExecutionException, IOException,
+                                               MojoFailureException {
+        if (StringUtils.endsWithAny(packExcludesConfig, ".yml", ".properties")) {
+            throw new MojoExecutionException(
+                "not support packExcludesConfig of .yml or .properties in sofa-ark-maven-plugin, please using default conf/ark/bootstrap.yml or conf/ark/bootstrap.properties");
+        }
+        ModuleSlimConfig moduleSlimConfig = (new ModuleSlimConfig())
+            .setPackExcludesConfig(packExcludesConfig).setPackExcludesUrl(packExcludesUrl)
+            .setExcludes(excludes).setExcludeGroupIds(excludeGroupIds)
+            .setExcludeArtifactIds(excludeArtifactIds)
+            .setBaseDependencyParentIdentity(baseDependencyParentIdentity);
+        ModuleSlimStrategy slimStrategy = new ModuleSlimStrategy(this.mavenProject,
+            parseDependencyGraph(), moduleSlimConfig, this.baseDir, this.getLog());
+        return slimStrategy.getSlimmedArtifacts();
     }
 
     private File getAppTargetFile() {
@@ -534,88 +647,48 @@ public class RepackageMojo extends TreeMojo {
 
     }
 
-    /**
-     * filter the excluded dependencies
-     *
-     * @param artifacts all dependencies of project
-     * @return dependencies excluded the excludes config
-     */
-    protected Set<Artifact> filterExcludeArtifacts(Set<Artifact> artifacts) {
-        // extension from other resource
-        if (!StringUtils.isEmpty(packExcludesConfig)) {
-            extensionExcludeArtifacts(baseDir + File.separator + ARK_CONF_BASE_DIR + File.separator
-                                      + packExcludesConfig);
-        }
-
-        List<ArtifactItem> excludeList = new ArrayList<>();
-        for (String exclude : excludes) {
-            ArtifactItem item = ArtifactItem.parseArtifactItemIgnoreVersion(exclude);
-            excludeList.add(item);
-        }
-
-        Set<Artifact> result = new LinkedHashSet<>();
-        for (Artifact e : artifacts) {
-            if (!checkMatchExclude(excludeList, e)) {
-                result.add(e);
-            }
-        }
-
-        return result;
+    public void setExcludes(String str) {
+        this.excludes = parseToSet(str);
     }
 
-    private boolean checkMatchExclude(List<ArtifactItem> excludeList, Artifact artifact) {
-        for (ArtifactItem exclude : excludeList) {
-            if (exclude.isSameIgnoreVersion(ArtifactItem.parseArtifactItem(artifact))) {
-                return true;
-            }
-        }
-
-        if (excludeGroupIds != null) {
-            // 支持通配符
-            for (String excludeGroupId : excludeGroupIds) {
-                excludeGroupId = StringUtils.removeEnd(excludeGroupId,
-                    Constants.PACKAGE_PREFIX_MARK);
-                if (artifact.getGroupId().startsWith(excludeGroupId)) {
-                    return true;
-                }
-            }
-        }
-
-        if (excludeArtifactIds != null) {
-            // 支持通配符
-            for (String excludeArtifactId : excludeArtifactIds) {
-                excludeArtifactId = StringUtils.removeEnd(excludeArtifactId,
-                    Constants.PACKAGE_PREFIX_MARK);
-                if (artifact.getArtifactId().startsWith(excludeArtifactId)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    public void setExcludeGroupIds(String str) {
+        this.excludeGroupIds = parseToSet(str);
     }
 
-    protected void extensionExcludeArtifacts(String extraResources) {
-        try {
-            File configFile = new File(extraResources);
-            if (configFile.exists()) {
-                BufferedReader bufferedReader = new BufferedReader(new FileReader(configFile));
-                String dataLine;
-                while ((dataLine = bufferedReader.readLine()) != null) {
-                    if (dataLine.startsWith(EXTENSION_EXCLUDES)) {
-                        ParseUtils.parseExcludeConf(excludes, dataLine, EXTENSION_EXCLUDES);
-                    } else if (dataLine.startsWith(EXTENSION_EXCLUDES_GROUPIDS)) {
-                        ParseUtils.parseExcludeConf(excludeGroupIds, dataLine,
-                            EXTENSION_EXCLUDES_GROUPIDS);
-                    } else if (dataLine.startsWith(EXTENSION_EXCLUDES_ARTIFACTIDS)) {
-                        ParseUtils.parseExcludeConf(excludeArtifactIds, dataLine,
-                            EXTENSION_EXCLUDES_ARTIFACTIDS);
-                    }
-                }
-            }
-        } catch (IOException ex) {
-            getLog().error("failed to extension excludes artifacts.", ex);
+    public void setExcludeArtifactIds(String str) {
+        this.excludeArtifactIds = parseToSet(str);
+    }
+
+    public void setDenyImportPackages(String str) {
+        this.denyImportPackages = parseToSet(str);
+    }
+
+    public void setDenyImportClasses(String str) {
+        this.denyImportClasses = parseToSet(str);
+    }
+
+    public void setDenyImportResources(String str) {
+        this.denyImportResources = parseToSet(str);
+    }
+
+    public void setInjectPluginDependencies(String str) {
+        this.injectPluginDependencies = parseToSet(str);
+    }
+
+    public void setInjectPluginExportPackages(String str) {
+        this.injectPluginExportPackages = parseToSet(str);
+    }
+
+    private LinkedHashSet<String> parseToSet(String str) {
+        LinkedHashSet<String> set = new LinkedHashSet<>();
+        if (StringUtils.isBlank(str)) {
+            return set;
         }
+        Arrays.stream(str.split(","))
+                .map(String::trim)
+                .filter(StringUtils::isNotBlank)
+                .forEach(set::add);
+        return set;
     }
 
     public static class ArkConstants {
