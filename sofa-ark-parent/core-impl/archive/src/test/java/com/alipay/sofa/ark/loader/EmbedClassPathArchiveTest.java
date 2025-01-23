@@ -16,13 +16,19 @@
  */
 package com.alipay.sofa.ark.loader;
 
+import com.alipay.sofa.ark.api.ArkClient;
+import com.alipay.sofa.ark.api.ArkConfigs;
+import com.alipay.sofa.ark.common.util.FileUtils;
 import com.alipay.sofa.ark.spi.archive.BizArchive;
+import com.alipay.sofa.ark.spi.constant.Constants;
+import com.alipay.sofa.ark.spi.model.Biz;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.springframework.boot.loader.archive.Archive;
 import org.springframework.boot.loader.archive.JarFileArchive;
 
-import java.io.File;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
@@ -30,7 +36,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.when;
 
 /**
  * @author bingjie.lbj
@@ -42,7 +50,7 @@ public class EmbedClassPathArchiveTest {
     public void testGetContainerArchive() throws Exception {
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         URL springbootFatJar = cl.getResource("sample-springboot-fat-biz.jar");
-        JarFileArchive jarFileArchive = new JarFileArchive(new File(springbootFatJar.getFile()));
+        JarFileArchive jarFileArchive = new JarFileArchive(FileUtils.file(springbootFatJar.getFile()));
         Iterator<Archive> archives = jarFileArchive.getNestedArchives(this::isNestedArchive,null);
         List<URL> urls = new ArrayList<>();
         while (archives.hasNext()){
@@ -75,7 +83,7 @@ public class EmbedClassPathArchiveTest {
     public void testStaticCombineGetBizArchives() throws Exception {
         ClassLoader cl = Thread.currentThread().getContextClassLoader();
         URL springbootFatJar = cl.getResource("static-combine-demo.jar");
-        JarFileArchive jarFileArchive = new JarFileArchive(new File(springbootFatJar.getFile()));
+        JarFileArchive jarFileArchive = new JarFileArchive(FileUtils.file(springbootFatJar.getFile()));
         Iterator<org.springframework.boot.loader.archive.Archive> archives = jarFileArchive.getNestedArchives(this::isNestedArchive,null);
         List<URL> urls = new ArrayList<>();
         while (archives.hasNext()){

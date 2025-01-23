@@ -441,6 +441,7 @@ public class Repackager {
         }
 
         manifest.getMainAttributes().putValue(MAIN_CLASS_ATTRIBUTE, startClass);
+        manifest.getMainAttributes().putValue(START_CLASS_ATTRIBUTE, startClass);
         manifest.getMainAttributes().putValue(ARK_BIZ_NAME, this.bizName);
         manifest.getMainAttributes().putValue(ARK_BIZ_VERSION, this.bizVersion);
         manifest.getMainAttributes().putValue(PRIORITY_ATTRIBUTE, priority);
@@ -482,6 +483,8 @@ public class Repackager {
         }
         manifest = new Manifest(manifest);
         manifest.getMainAttributes().putValue(MAIN_CLASS_ATTRIBUTE,
+            Layouts.Jar.jar().getLauncherClassName());
+        manifest.getMainAttributes().putValue(START_CLASS_ATTRIBUTE,
             Layouts.Jar.jar().getLauncherClassName());
 
         if (arkVersion == null || arkVersion.isEmpty()) {
@@ -563,11 +566,11 @@ public class Repackager {
     /**
      * An {@code EntryTransformer} that renames entries by applying a prefix.
      */
-    private static final class RenamingEntryTransformer implements JarWriter.EntryTransformer {
+    static final class RenamingEntryTransformer implements JarWriter.EntryTransformer {
 
         private final String namePrefix;
 
-        private RenamingEntryTransformer(String namePrefix) {
+        RenamingEntryTransformer(String namePrefix) {
             this.namePrefix = namePrefix;
         }
 

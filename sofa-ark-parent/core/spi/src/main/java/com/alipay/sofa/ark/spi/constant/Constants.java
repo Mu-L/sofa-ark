@@ -48,6 +48,8 @@ public class Constants {
     public final static String       ARK_CONF_FILE                                 = "bootstrap.properties";
     public final static String       ARK_CONF_FILE_FORMAT                          = "bootstrap-%s.properties";
 
+    public final static String       ARK_CONF_YAML_FILE                            = "bootstrap.yml";
+
     public final static String       PLUGIN_EXTENSION_FORMAT                       = "PLUGIN-EXPORT[%s]";
 
     public final static String       DEFAULT_PROFILE                               = EMPTY_STR;
@@ -93,6 +95,8 @@ public class Constants {
     public final static String       WEB_CONTEXT_PATH                              = "web-context-path";
     public final static String       IMPORT_CLASSES_ATTRIBUTE                      = "import-classes";
     public final static String       IMPORT_PACKAGES_ATTRIBUTE                     = "import-packages";
+
+    public final static String       EXPORT_MODE                                   = "export-mode";
     public final static String       EXPORT_CLASSES_ATTRIBUTE                      = "export-classes";
     public final static String       EXPORT_PACKAGES_ATTRIBUTE                     = "export-packages";
 
@@ -100,6 +104,7 @@ public class Constants {
      * Ark Biz Attribute
      */
     public final static String       MAIN_CLASS_ATTRIBUTE                          = "Main-Class";
+    public final static String       START_CLASS_ATTRIBUTE                         = "Start-Class";
     public final static String       ARK_BIZ_NAME                                  = "Ark-Biz-Name";
     public final static String       ARK_BIZ_VERSION                               = "Ark-Biz-Version";
     public final static String       DENY_IMPORT_CLASSES                           = "deny-import-classes";
@@ -108,6 +113,7 @@ public class Constants {
     public final static String       INJECT_PLUGIN_DEPENDENCIES                    = "inject-plugin-dependencies";
     public final static String       INJECT_EXPORT_PACKAGES                        = "inject-export-packages";
     public final static String       DECLARED_LIBRARIES                            = "declared-libraries";
+    public final static String       DEPENDENT_PLUGINS                             = "dependent-plugins";
 
     public static final String       BRANCH                                        = "commit-branch";
     public static final String       COMMIT_ID                                     = "commit-id";
@@ -123,6 +129,8 @@ public class Constants {
     public static final String       DATE_FORMAT                                   = "yyyy-MM-dd'T'HH:mm:ssZ";
 
     public final static String       PACKAGE_PREFIX_MARK                           = "*";
+
+    public final static String       PACKAGE_PREFIX_MARK_2                         = ".*";
     public final static String       DEFAULT_PACKAGE                               = ".";
     public final static String       MANIFEST_VALUE_SPLIT                          = COMMA_SPLIT;
     public final static String       RESOURCE_STEM_MARK                            = "*";
@@ -140,6 +148,20 @@ public class Constants {
     public final static String       TELNET_SERVER_ENABLE                          = "sofa.ark.telnet.server.enable";
     public final static String       TELNET_SERVER_SECURITY_ENABLE                 = "sofa.ark.telnet.security.enable";
     public final static String       CONFIG_SERVER_ENABLE                          = "sofa.ark.config.server.enable";
+
+    /**
+     * 配置中心支持, 默认使用zookeeper
+     * value值为com.alipay.sofa.ark.config.ConfigTypeEnum枚举的name()
+     */
+    public final static String       CONFIG_SERVER_TYPE                            = "sofa.ark.config.server.type";
+    /**
+     * 使用apollo的namespace
+     */
+    public final static String       CONFIG_APOLLO_NAMESPACE                       = "sofa-ark";
+    /**
+     * apollo的namespace下动态命名对应的key
+     */
+    public final static String       APOLLO_MASTER_BIZ_KEY                         = "masterBiz";
     public final static String       TELNET_PORT_ATTRIBUTE                         = "sofa.ark.telnet.port";
     public final static int          DEFAULT_TELNET_PORT                           = 1234;
     public final static int          DEFAULT_SELECT_PORT_SIZE                      = 100;
@@ -150,8 +172,12 @@ public class Constants {
     /**
      * Event
      */
+    public final static String       BIZ_EVENT_TOPIC_AFTER_INVOKE_ALL_BIZ_START    = "AFTER-INVOKE-ALL-BIZ-START";
     public final static String       BIZ_EVENT_TOPIC_AFTER_INVOKE_BIZ_START        = "AFTER-INVOKE-BIZ-START";
+    public final static String       BIZ_EVENT_TOPIC_AFTER_BIZ_FAILED              = "BIZ_EVENT_TOPIC_AFTER_BIZ_FAILED";
     public final static String       BIZ_EVENT_TOPIC_AFTER_INVOKE_BIZ_STOP         = "AFTER-INVOKE-BIZ-STOP";
+    public final static String       BIZ_EVENT_TOPIC_AFTER_INVOKE_BIZ_STOP_FAILED  = "AFTER-INVOKE-BIZ-STOP-FAILED";
+
     public final static String       BIZ_EVENT_TOPIC_BEFORE_RECYCLE_BIZ            = "BEFORE-RECYCLE-BIZ";
     public final static String       BIZ_EVENT_TOPIC_BEFORE_INVOKE_BIZ_START       = "BEFORE-INVOKE-BIZ-START";
     public final static String       BIZ_EVENT_TOPIC_BEFORE_INVOKE_BIZ_STOP        = "BEFORE-INVOKE-BIZ-STOP";
@@ -176,7 +202,32 @@ public class Constants {
     public final static String       EMBED_ENABLE                                  = "sofa.ark.embed.enable";
     public final static String       PLUGIN_EXPORT_CLASS_ENABLE                    = "sofa.ark.plugin.export.class.enable";
     public final static String       EMBED_STATIC_BIZ_ENABLE                       = "sofa.ark.embed.static.biz.enable";
+
+    public final static String       EMBED_STATIC_BIZ_IN_RESOURCE_ENABLE           = "sofa.ark.embed.static.biz.in.resource.enable";
     public final static String       ACTIVATE_NEW_MODULE                           = "activate.new.module";
+    public final static String       BIZ_MAIN_CLASS                                = "sofa.ark.biz.main.class";
+    public final static String       PLUGIN_CLASS_ISOLATION_ENABLE                 = "sofa.ark.plugin.class.isolation.enable";
+    public final static String       BIZ_SPECIFY_DEPENDENT_PLUGINS_ENABLE          = "sofa.ark.biz.specify.dependent.plugins.enable";
+
+    /**
+     * uninstall the biz if it starts up failed
+     */
+    public final static String       AUTO_UNINSTALL_WHEN_FAILED_ENABLE             = "sofa.ark.auto.uninstall.when.failed.enable";
+
+    /**
+     * unpack the biz when install
+     */
+    public final static String       UNPACK_BIZ_WHEN_INSTALL                       = "sofa.ark.unpack.biz.when.install";
+
+    /**
+     * support multiple version biz as activated
+     */
+    public final static String       ACTIVATE_MULTI_BIZ_VERSION_ENABLE             = "sofa.ark.activate.multi.biz.version.enable";
+
+    /**
+     * auto remove the biz instance in BizManagerService if it stops failed
+     */
+    public final static String       REMOVE_BIZ_INSTANCE_AFTER_STOP_FAILED         = "sofa.ark.remove.biz.instance.when.stop.failed.enable";
 
     /**
      * Command Provider
@@ -191,21 +242,27 @@ public class Constants {
     public final static String       PLUGIN_CLASS_LOADER_HOOK                      = "plugin-classloader-hook";
     public final static String       BIZ_CLASS_LOADER_HOOK                         = "biz-classloader-hook";
     public final static String       BIZ_CLASS_LOADER_HOOK_DIR                     = "com.alipay.sofa.ark.biz.classloader.hook.dir";
+    public final static String       BIZ_TEMP_WORK_DIR_RECYCLE_FILE_SUFFIX         = "deleted";
 
     /**
      * Multiply biz name
      */
     public final static String       MASTER_BIZ                                    = "com.alipay.sofa.ark.master.biz";
 
+    public final static String       SOFA_ARK_MODULE                               = "SOFA-ARK/biz/";
+
     /**
      * Config Server
      */
     public final static String       CONFIG_SERVER_ADDRESS                         = "com.alipay.sofa.ark.config.address";
+    public final static String       CONFIG_SERVER_ENVIRONMENT                     = "com.alipay.sofa.ark.config.env";
     public final static String       CONFIG_PROTOCOL_ZOOKEEPER                     = "zookeeper";
     public final static String       CONFIG_PROTOCOL_ZOOKEEPER_HEADER              = "zookeeper://";
     public final static String       ZOOKEEPER_CONTEXT_SPLIT                       = "/";
     public final static String       CONFIG_INSTALL_BIZ_DIR                        = "com.alipay.sofa.ark.biz.dir";
+    public final static String       CONFIG_INSTALL_PLUGIN_DIR                     = "com.alipay.sofa.ark.plugin.dir";
     public final static String       CONFIG_BIZ_URL                                = "bizUrl";
+    public final static String       BIZ_EXTENSION_URLS                            = "bizExtensionUrls";
 
     public final static String       CONFIG_CONNECT_TIMEOUT                        = "com.alipay.sofa.ark.config.connect.timeout";
     public final static int          DEFAULT_CONFIG_CONNECT_TIMEOUT                = 20000;
@@ -220,6 +277,12 @@ public class Constants {
     public final static String       EXTENSION_EXCLUDES_GROUPIDS                   = "excludeGroupIds";
     public final static String       EXTENSION_EXCLUDES_ARTIFACTIDS                = "excludeArtifactIds";
 
+    public final static String       EXTENSION_INCLUDES                            = "includes";
+    public final static String       EXTENSION_INCLUDES_GROUPIDS                   = "includeGroupIds";
+    public final static String       EXTENSION_INCLUDES_ARTIFACTIDS                = "includeArtifactIds";
+
+    public final static String       DECLARED_LIBRARIES_WHITELIST                  = "declared.libraries.whitelist";
+
     public static final List<String> CHANNEL_QUIT                                  = new ArrayList<>();
 
     static {
@@ -227,5 +290,4 @@ public class Constants {
         CHANNEL_QUIT.add("q");
         CHANNEL_QUIT.add("exit");
     }
-
 }

@@ -19,8 +19,6 @@ package com.alipay.sofa.ark.container.service.event;
 import com.alipay.sofa.ark.common.log.ArkLoggerFactory;
 import com.alipay.sofa.ark.common.util.OrderComparator;
 import com.alipay.sofa.ark.spi.event.ArkEvent;
-import com.alipay.sofa.ark.spi.event.biz.BeforeBizRecycleEvent;
-import com.alipay.sofa.ark.spi.event.plugin.AfterPluginStopEvent;
 import com.alipay.sofa.ark.spi.registry.ServiceReference;
 import com.alipay.sofa.ark.spi.service.PriorityOrdered;
 import com.alipay.sofa.ark.spi.service.event.EventAdminService;
@@ -28,7 +26,6 @@ import com.alipay.sofa.ark.spi.service.event.EventHandler;
 import com.alipay.sofa.ark.spi.service.registry.RegistryService;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
-import org.slf4j.Logger;
 
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
@@ -47,9 +44,6 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public class EventAdminServiceImpl implements EventAdminService, EventHandler {
 
     private final static ConcurrentMap<ClassLoader, CopyOnWriteArraySet<EventHandler>> SUBSCRIBER_MAP = new ConcurrentHashMap<>();
-
-    private final static Logger                                                        LOGGER         = ArkLoggerFactory
-                                                                                                          .getDefaultLogger();
 
     @Inject
     private RegistryService                                                            registryService;
@@ -89,7 +83,8 @@ public class EventAdminServiceImpl implements EventAdminService, EventHandler {
             }
         }
         set.add(eventHandler);
-        LOGGER.debug(String.format("Register event handler: %s.", eventHandler));
+        ArkLoggerFactory.getDefaultLogger().debug(
+            String.format("Register event handler: %s.", eventHandler));
     }
 
     @Override
@@ -98,30 +93,21 @@ public class EventAdminServiceImpl implements EventAdminService, EventHandler {
             .getClassLoader());
         if (set != null) {
             set.remove(eventHandler);
-            LOGGER.debug(String.format("Unregister event handler: %s.", eventHandler));
+            ArkLoggerFactory.getDefaultLogger().debug(
+                String.format("Unregister event handler: %s.", eventHandler));
         }
     }
 
     @Override
     public void unRegister(ClassLoader classLoader) {
         SUBSCRIBER_MAP.remove(classLoader);
-        LOGGER.debug(String.format("Unregister event handler of classLoader: %s.", classLoader));
+        ArkLoggerFactory.getDefaultLogger().debug(
+            String.format("Unregister event handler of classLoader: %s.", classLoader));
 
     }
 
     @Override
     public void handleEvent(ArkEvent event) {
-        ClassLoader classLoader = null;
-
-        if (event instanceof BeforeBizRecycleEvent) {
-            classLoader = ((BeforeBizRecycleEvent) event).getSource().getBizClassLoader();
-        } else if (event instanceof AfterPluginStopEvent) {
-            classLoader = ((AfterPluginStopEvent) event).getSource().getPluginClassLoader();
-        }
-
-        if (classLoader != null) {
-            unRegister(classLoader);
-        }
     }
 
     @Override

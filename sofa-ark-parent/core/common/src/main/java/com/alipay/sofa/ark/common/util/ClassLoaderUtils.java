@@ -17,11 +17,11 @@
 package com.alipay.sofa.ark.common.util;
 
 import com.alipay.sofa.ark.exception.ArkRuntimeException;
-import sun.misc.Unsafe;
 
 import java.io.File;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.lang.reflect.Field;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.security.AccessController;
@@ -37,9 +37,13 @@ import java.util.List;
  */
 public class ClassLoaderUtils {
 
-    private static final String JAVA_AGENT_MARK        = "-javaagent:";
+    private static final String   JAVA_AGENT_MARK        = "-javaagent:";
 
-    private static final String JAVA_AGENT_OPTION_MARK = "=";
+    private static final String   JAVA_AGENT_OPTION_MARK = "=";
+
+    private static final String   SKYWALKING_AGENT_JAR   = "skywalking-agent.jar";
+
+    private static final String[] SKYWALKING_MOUNT_DIR   = { "plugins", "activations" };
 
     /**
      * push ContextClassLoader
@@ -79,13 +83,36 @@ public class ClassLoaderUtils {
             argument = argument.substring(JAVA_AGENT_MARK.length());
             try {
                 String path = argument.split(JAVA_AGENT_OPTION_MARK)[0];
-                URL url = new File(path).toURI().toURL();
+                URL url = FileUtils.file(path).getCanonicalFile().toURI().toURL();
                 agentPaths.add(url);
+                processSkyWalking(path, agentPaths);
             } catch (Throwable e) {
                 throw new ArkRuntimeException("Failed to create java agent classloader", e);
             }
         }
         return agentPaths.toArray(new URL[] {});
+
+    }
+
+    /**
+     * process skywalking agent plugins/activations
+     * @param path
+     * @param agentPaths
+     * @throws MalformedURLException
+     */
+    public static void processSkyWalking(final String path, final List<URL> agentPaths) throws MalformedURLException, IOException {
+        if (path.contains(SKYWALKING_AGENT_JAR)) {
+            for (String mountFolder : SKYWALKING_MOUNT_DIR) {
+                File folder = new File(FileUtils.file(path).getCanonicalFile().getParentFile(), mountFolder);
+                if (folder.exists() && folder.isDirectory()) {
+                    String[] jarFileNames = folder.list((dir, name) -> name.endsWith(".jar"));
+                    for (String fileName: jarFileNames) {
+                        File jarFile = new File(folder, fileName);
+                        agentPaths.add(jarFile.toURI().toURL());
+                    }
+                }
+            }
+        }
     }
 
     @SuppressWarnings({ "restriction", "unchecked" })
@@ -96,28 +123,21 @@ public class ClassLoaderUtils {
         }
 
         // support jdk9+
-
-        try {
-            Field field = Unsafe.class.getDeclaredField("theUnsafe");
-            field.setAccessible(true);
-            Unsafe unsafe = (Unsafe) field.get(null);
-
-            // jdk.internal.loader.ClassLoaders.AppClassLoader.ucp
-            Field ucpField = classLoader.getClass().getDeclaredField("ucp");
-            long ucpFieldOffset = unsafe.objectFieldOffset(ucpField);
-            Object ucpObject = unsafe.getObject(classLoader, ucpFieldOffset);
-
-            // jdk.internal.loader.URLClassPath.path
-            Field pathField = ucpField.getType().getDeclaredField("path");
-            long pathFieldOffset = unsafe.objectFieldOffset(pathField);
-            ArrayList<URL> path = (ArrayList<URL>) unsafe.getObject(ucpObject, pathFieldOffset);
-
-            return path.toArray(new URL[path.size()]);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+        String classpath = System.getProperty("java.class.path");
+        String[] classpathEntries = classpath.split(System.getProperty("path.separator"));
+        List<URL> classpathURLs = new ArrayList<>();
+        for (String classpathEntry : classpathEntries) {
+            URL url = null;
+            try {
+                url = FileUtils.file(classpathEntry).toURI().toURL();
+            } catch (MalformedURLException e) {
+                e.printStackTrace();
+                throw new ArkRuntimeException("Failed to get urls from " + classLoader, e);
+            }
+            classpathURLs.add(url);
         }
 
+        return classpathURLs.toArray(new URL[0]);
     }
 
 }

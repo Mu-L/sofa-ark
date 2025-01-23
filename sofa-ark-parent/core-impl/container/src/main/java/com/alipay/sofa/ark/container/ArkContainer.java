@@ -16,10 +16,12 @@
  */
 package com.alipay.sofa.ark.container;
 
+import com.alipay.sofa.ark.api.ArkClient;
 import com.alipay.sofa.ark.api.ArkConfigs;
 import com.alipay.sofa.ark.bootstrap.ClasspathLauncher.ClassPathArchive;
 import com.alipay.sofa.ark.common.log.ArkLoggerFactory;
 import com.alipay.sofa.ark.common.util.AssertUtils;
+import com.alipay.sofa.ark.common.util.FileUtils;
 import com.alipay.sofa.ark.common.util.StringUtils;
 import com.alipay.sofa.ark.container.pipeline.DeployBizStage;
 import com.alipay.sofa.ark.container.pipeline.HandleArchiveStage;
@@ -30,11 +32,15 @@ import com.alipay.sofa.ark.loader.EmbedClassPathArchive;
 import com.alipay.sofa.ark.loader.ExecutableArkBizJar;
 import com.alipay.sofa.ark.loader.archive.ExplodedArchive;
 import com.alipay.sofa.ark.loader.archive.JarFileArchive;
+import com.alipay.sofa.ark.spi.archive.BizArchive;
 import com.alipay.sofa.ark.spi.archive.ExecutableArchive;
 import com.alipay.sofa.ark.spi.argument.LaunchCommand;
 import com.alipay.sofa.ark.spi.constant.Constants;
+import com.alipay.sofa.ark.spi.model.Biz;
 import com.alipay.sofa.ark.spi.pipeline.Pipeline;
 import com.alipay.sofa.ark.spi.pipeline.PipelineContext;
+import com.alipay.sofa.ark.spi.service.biz.AddBizToStaticDeployHook;
+import com.alipay.sofa.ark.spi.service.extension.ArkServiceLoader;
 import com.alipay.sofa.common.log.MultiAppLoggerSpaceManager;
 import com.alipay.sofa.common.log.SpaceId;
 import com.alipay.sofa.common.log.SpaceInfo;
@@ -45,7 +51,6 @@ import com.alipay.sofa.common.utils.ReportUtil;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -67,21 +72,23 @@ import static com.alipay.sofa.common.log.Constants.UTF8_STR;
  */
 public class ArkContainer {
 
-    private ArkServiceContainer arkServiceContainer;
+    private ArkServiceContainer            arkServiceContainer;
 
-    private PipelineContext     pipelineContext;
+    private PipelineContext                pipelineContext;
 
-    private AtomicBoolean       started           = new AtomicBoolean(false);
+    private AtomicBoolean                  started           = new AtomicBoolean(false);
 
-    private AtomicBoolean       stopped           = new AtomicBoolean(false);
+    private AtomicBoolean                  stopped           = new AtomicBoolean(false);
 
-    private long                start             = System.currentTimeMillis();
+    private long                           start             = System.currentTimeMillis();
+
+    private List<AddBizToStaticDeployHook> addBizToStaticDeployHooks;
 
     /**
      * -Aclasspath or -Ajar is needed at lease. it specify the abstract executable ark archive,
      * default added by container itself
      */
-    private static final int    MINIMUM_ARGS_SIZE = 1;
+    private static final int               MINIMUM_ARGS_SIZE = 1;
 
     public static Object main(String[] args) throws ArkRuntimeException {
         if (args.length < MINIMUM_ARGS_SIZE) {
@@ -92,8 +99,7 @@ public class ArkContainer {
             LaunchCommand launchCommand = LaunchCommand.parse(args);
             if (launchCommand.isExecutedByCommandLine()) {
                 ExecutableArkBizJar executableArchive;
-                File rootFile = new File(URLDecoder.decode(launchCommand.getExecutableArkBizJar()
-                    .getFile()));
+                File rootFile = FileUtils.file(launchCommand.getExecutableArkBizJar().getFile());
                 if (rootFile.isDirectory()) {
                     executableArchive = new ExecutableArkBizJar(new ExplodedArchive(rootFile));
                 } else {
@@ -146,6 +152,8 @@ public class ArkContainer {
                 }
             }));
             prepareArkConfig();
+            // don't remove this log print, add to init log space first before initialize ArkLogger
+            ArkLoggerFactory.getDefaultLogger().info("Ark container starting...");
             reInitializeArkLogger();
             arkServiceContainer.start();
             Pipeline pipeline = arkServiceContainer.getService(Pipeline.class);
@@ -162,11 +170,35 @@ public class ArkContainer {
         HandleArchiveStage handleArchiveStage = ArkServiceContainerHolder.getContainer()
             .getService(HandleArchiveStage.class);
         handleArchiveStage.processStaticBizFromClasspath(pipelineContext);
+
+        // execute beforeEmbedStaticDeployBizHook
+        addStaticBizFromCustomHooks();
+
         // start up
         DeployBizStage deployBizStage = ArkServiceContainerHolder.getContainer().getService(
             DeployBizStage.class);
         deployBizStage.processStaticBiz(pipelineContext);
         return this;
+    }
+
+    private void addStaticBizFromCustomHooks() throws Exception {
+        addBizToStaticDeployHooks = ArkServiceLoader.loadExtensionsFromArkBiz(
+            AddBizToStaticDeployHook.class, ArkClient.getMasterBiz().getIdentity());
+        for (AddBizToStaticDeployHook hook : addBizToStaticDeployHooks) {
+            List<BizArchive> bizsFromHook = hook.getStaticBizToAdd();
+            addStaticBiz(bizsFromHook);
+        }
+    }
+
+    private void addStaticBiz(List<BizArchive> bizArchives) throws IOException {
+        if (null == bizArchives) {
+            return;
+        }
+
+        for (BizArchive bizArchive : bizArchives) {
+            Biz biz = ArkClient.getBizFactoryService().createBiz(bizArchive);
+            ArkClient.getBizManagerService().registerBiz(biz);
+        }
     }
 
     /**
@@ -218,8 +250,8 @@ public class ArkContainer {
      * @throws ArkRuntimeException
      */
     public void reInitializeArkLogger() throws ArkRuntimeException {
-        for (Map.Entry<SpaceId, SpaceInfo> entry : MultiAppLoggerSpaceManager.getSpacesMap()
-            .entrySet()) {
+        for (Map.Entry<SpaceId, SpaceInfo> entry : ((Map<SpaceId, SpaceInfo>) MultiAppLoggerSpaceManager
+            .getSpacesMap()).entrySet()) {
             SpaceId spaceId = entry.getKey();
             SpaceInfo spaceInfo = entry.getValue();
             if (!ArkLoggerFactory.SOFA_ARK_LOGGER_SPACE.equals(spaceId.getSpaceName())) {
